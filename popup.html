@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="styles.css">
+  <script src="ethereal.js" type="module"></script>
+</head>
+<body class="dark-mode">
+  
+  <ethereal-shadow color="rgba(128, 128, 128, 1)" scale="100" speed="50" noise-opacity="1" sizing="fill">
+    
+    <div class="main-container">
+        <div class="header">
+          <h1 class="main-title">Fine Print Whisperer</h1>
+          <div class="header-actions">
+            <!-- Theme Toggle Button Native Impl of Shadcn's -->
+            <button id="theme-toggle" class="theme-toggle" title="Toggle Theme">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sun sun-icon"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-moon moon-icon"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+            </button>
+            <button id="settings-btn" class="gear-icon" title="Settings">⚙️</button>
+          </div>
+        </div>
+
+        <div id="loading-state" class="hide state-box">
+          <div class="wobble-anim">🔍 Scanning...</div>
+        </div>
+
+        <div id="results-container" class="hide">
+          <!-- TL;DR Card -->
+          <div class="tldr-card dynamic-card">
+            <div class="tldr-title">KEY INSIGHTS ⚡</div>
+            <ul id="tldr-list" class="tldr-list"></ul>
+          </div>
+
+          <!-- Risk Meter -->
+          <div class="risk-meter dynamic-text">
+            <div class="risk-title">Risk Level:</div>
+            <div id="risk-circle" class="risk-circle dynamic-circle">?</div>
+            <div id="ai-badge" class="ai-badge hide">✨ AI</div>
+          </div>
+
+          <!-- Red Flags sticky notes -->
+          <div id="flags-container" class="flags-container"></div>
+
+          <!-- Green Flags -->
+          <div id="green-flags" class="green-flags"></div>
+        </div>
+
+        <div id="message-container" class="message-box hide dynamic-text state-box">
+          Open a ToS or Privacy Policy page to see flags here.
+        </div>
+
+        <button id="scan-btn" class="scan-btn dynamic-btn">Scan This Page 🔍</button>
+    </div>
+
+  </ethereal-shadow>
+
+  <!-- Chat FAB -->
+  <button id="chat-fab" class="chat-fab" title="Ask about the ToS">💬</button>
+
+  <!-- Chat Panel -->
+  <div id="chat-panel" class="chat-panel">
+    <div class="chat-header">
+      <span class="chat-title">Ask the Fine Print 💬</span>
+      <button id="chat-close" class="chat-close">✕</button>
+    </div>
+    <div id="chat-messages" class="chat-messages">
+      <div class="chat-welcome">
+        <div class="chat-welcome-emoji">🔮</div>
+        <div class="chat-welcome-text">ask me anything about this page's Terms of Service!</div>
+      </div>
+    </div>
+    <div class="chat-chips" id="chat-chips-container">
+      <button class="chat-chip" data-q="Can I get a refund?">💰 Refunds?</button>
+      <button class="chat-chip" data-q="Do they share my location data?">📍 Location?</button>
+      <button class="chat-chip" data-q="Can I delete my data?">🗑️ Delete data?</button>
+      <button class="chat-chip" data-q="What happens if I cancel?">❌ Cancel?</button>
+      <button class="chat-chip" data-q="Do they sell my data to third parties?">💸 Data selling?</button>
+    </div>
+    <div class="chat-input-area">
+      <input id="chat-input" type="text" placeholder="Ask anything about the ToS..." class="chat-input" autocomplete="off">
+      <button id="chat-send" class="chat-send" title="Send">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Settings Panel -->
+  <div id="settings-panel" class="settings-panel dynamic-panel">
+    <div class="settings-header">
+      <h2>Settings</h2>
+      <button id="close-settings" class="close-settings">✕</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Auto-detect ToS pages</div>
+      <label class="switch">
+        <input type="checkbox" id="auto-detect-toggle" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">Use Chrome AI (on-device)</div>
+      <label class="switch">
+        <input type="checkbox" id="ai-toggle" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="settings-divider"></div>
+    <div class="setting-row api-key-row">
+      <div class="setting-label">Gemini API Key</div>
+      <input type="password" id="gemini-key-input" class="api-key-input" placeholder="Paste key...">
+    </div>
+    <div class="api-key-help">
+      Get one free at <a href="#" id="get-api-key-link">Google AI Studio</a> ✨
+    </div>
+    <div class="info-note">100% free — powered by Gemini Flash ⚡</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
