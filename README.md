@@ -59,30 +59,50 @@ Scrapbook-inspired Gen-Z aesthetic with:
 
 ---
 
-## 🔑 Optional: Add Gemini API Key (Free)
+## 🤖 How the AI works (zero setup)
 
-Adding a free Gemini API key supercharges the extension with AI-powered analysis:
+AI is **built in** — no API key required.
 
-1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
-2. Sign in with your Google account
-3. Click **"Create API Key"**
-4. In the extension, click ⚙️ **Settings** → paste your key
+- **Passive auto-detection** (the on-page banner + highlights) runs **locally** with
+  fast regex matching, so it's free and private and never calls a server.
+- **Clicking "Scan This Page"** or **asking a chat question** sends the visible page
+  text to a small managed backend ([`/backend`](./backend)) that holds **one** AI
+  provider key and returns the analysis. If the backend is unreachable or over quota,
+  the extension gracefully falls back to the local regex scanner.
 
-| Feature | Without API Key | With API Key |
-|---|---|---|
-| Red Flag Detection | Keyword matching | AI-powered understanding |
-| TL;DR Summary | Generic | Smart, context-aware |
-| Chat Answers | Limited to ~7 topics | Can answer anything |
-| Cost | Free | Also free |
+The backend is a [Cloudflare Worker](./backend/README.md) and is **provider-agnostic**
+(**Groq** by default — Llama 3.3 70B; Anthropic Claude and Google Gemini are drop-in
+alternatives, switchable with a single config var). See [`backend/README.md`](./backend/README.md)
+to deploy your own.
+
+See [`PRIVACY.md`](./PRIVACY.md) for exactly what is and isn't sent off-device.
+
+### Architecture
+
+```
+Chrome Extension (client)                    Managed Backend (Cloudflare Worker)
+─────────────────────────                    ───────────────────────────────────
+content.js  auto-detect banner   ── regex only, no network (free) ──┐
+            + highlight          (stays fully client-side)          │
+popup.js    "Scan" button        ── POST /api/scan ──►  rate-limit ─┤─►  AI provider
+            chat panel           ── POST /api/chat ──►  + CORS +    │    (Groq / Claude
+                                                        validation  │     / Gemini)
+            └─ regex/keyword fallback if backend is down or rate-limited ┘
+```
+
+**Cost control by design:** the passive banner runs regex on every page (free); the
+AI backend is only called on *explicit* user action (Scan / chat), so spend tracks
+real engagement. A per-(IP + anonymous install-id) hourly rate limit lives in
+Workers KV.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Manifest V3** Chrome Extension
-- **Vanilla JS** — No frameworks, no build step
-- **Gemini 2.0 Flash API** — For AI-powered analysis (optional)
-- **Chrome Built-in AI** — On-device AI support (when available)
+- **Manifest V3** Chrome Extension — Vanilla JS, no frameworks, no build step
+- **Managed AI backend** — Cloudflare Worker proxy, provider-agnostic
+- **Groq (Llama 3.3 70B)** — default AI provider for scans + chat (Claude / Gemini swappable)
+- **Workers KV** — anonymous per-install rate limiting
 - **Custom CSS** — Handcrafted scrapbook aesthetic
 
 ---
@@ -93,13 +113,21 @@ Adding a free Gemini API key supercharges the extension with AI-powered analysis
 Fine Print Whisperer/
 ├── manifest.json      # Extension config
 ├── popup.html         # Extension popup UI
-├── popup.js           # Popup logic & chat feature
+├── popup.js           # Popup logic, backend calls & chat feature
 ├── styles.css         # All styling
-├── content.js         # ToS detection & keyword scanning
-├── background.js      # Service worker
+├── content.js         # ToS detection & local regex scanning
+├── background.js      # Service worker (toolbar badge)
 ├── ethereal.js        # Animated background effect
 ├── overlay.css        # In-page banner styles
-└── icons/             # Extension icons
+├── icons/             # Extension icons
+├── PRIVACY.md         # Privacy policy (Chrome Web Store requirement)
+└── backend/           # Managed AI proxy (Cloudflare Worker)
+    ├── src/index.js          # Router, CORS, rate limiting, validation
+    ├── src/prompts.js        # Server-side scan + chat prompts
+    ├── src/providers/        # groq.js (default), claude.js, gemini.js
+    ├── smoke-test.sh         # Pre-deploy provider + endpoint checks
+    ├── wrangler.toml         # Worker config (no secrets committed)
+    └── README.md             # Deploy + provider-swap guide
 ```
 
 ---
