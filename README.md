@@ -46,16 +46,25 @@ Scrapbook-inspired Gen-Z aesthetic with:
 
 ## 🚀 Installation
 
-### From Source (Developer Mode)
+### Option 1 — Download the packaged extension (easiest)
+1. Go to the [**latest release**](https://github.com/manya5/Fine-Print-Whisperer/releases/latest).
+2. Under **Assets**, download `fine-print-whisperer-v1.1.zip`.
+3. **Unzip it** to a folder (Chrome's "Load unpacked" needs a folder, not a `.zip`).
+4. Open Chrome → `chrome://extensions/` → enable **Developer mode** (top-right toggle).
+5. Click **"Load unpacked"** and select the unzipped folder.
+6. Pin the 👀 icon from the toolbar's puzzle-piece menu. Done! 🎉
+
+### Option 2 — From source (for development)
 1. Clone this repo:
    ```bash
    git clone https://github.com/manya5/Fine-Print-Whisperer.git
    ```
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable **Developer mode** (top right toggle)
-4. Click **"Load unpacked"**
-5. Select the cloned folder
-6. Done! The extension icon will appear in your toolbar 🎉
+2. `chrome://extensions/` → **Developer mode** → **Load unpacked** → select the repo folder.
+   *(The extension loads from the repo root; the `backend/` folder is ignored by Chrome.)*
+
+> **Note:** the in-page banner + regex scan work immediately. The **Scan** button and
+> chat use the hosted AI backend — they work out of the box against the deployed Worker,
+> or point them at your own (see [`backend/README.md`](./backend/README.md)).
 
 ---
 
