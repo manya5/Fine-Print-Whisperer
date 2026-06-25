@@ -1,0 +1,22 @@
+name = "fine-print-whisperer"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Anonymous, per-(IP + install-id) rate limiting lives in this KV namespace.
+# Create it once with:  wrangler kv namespace create RATE_LIMIT_KV
+# then paste the returned id below. Local `wrangler dev` works without it.
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "da860195195543e8aec47729e9b36a9f"
+
+[vars]
+# "groq" (default), "claude", or "gemini". Provider is swappable without code changes.
+AI_PROVIDER = "groq"
+# Optional: pin CORS to the published extension id once it's known.
+# ALLOWED_EXTENSION_ID = "abcdefghijklmnop..."
+
+# Secrets (NOT committed) — local dev reads them from .dev.vars; for production
+# set them with `wrangler secret put`:
+#   wrangler secret put GROQ_API_KEY           # when AI_PROVIDER = "groq"
+#   wrangler secret put ANTHROPIC_API_KEY      # when AI_PROVIDER = "claude"
+#   wrangler secret put GEMINI_API_KEY         # when AI_PROVIDER = "gemini"

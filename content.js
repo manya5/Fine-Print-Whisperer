@@ -144,7 +144,7 @@
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "force_scan") {
-      performScan(request.useAI, true).then(sendResponse).catch(() => sendResponse({ success: false, error: "error" }));
+      performScan(true).then(sendResponse).catch(() => sendResponse({ success: false, error: "error" }));
       return true; // async response
     }
     if (request.action === "get_tos_text") {
@@ -190,7 +190,7 @@
     return false;
   }
 
-  async function performScan(useAI, force = false) {
+  async function performScan(force = false) {
     const text = document.body.innerText;
     if (!text || text.trim().length === 0) {
       return { success: false, error: "no_text" };
@@ -200,27 +200,15 @@
       return { success: false, error: "not_tos" };
     }
 
-    let result = null;
-    let aiUsed = false;
+    // Local regex scan. This is the offline / over-quota fallback path; the
+    // popup uses the managed AI backend for full-quality scans on demand.
+    const result = await runKeywordScan(text);
 
-    if (useAI && window.ai && window.ai.languageModel) {
-      try {
-        result = await runAIScan(text);
-        aiUsed = true;
-      } catch (e) {
-        console.warn("FPW: AI scan failed, falling back to keyword scan.", e);
-        result = await runKeywordScan(text);
-      }
-    } else {
-      result = await runKeywordScan(text);
-    }
-
-    // Highlight found keywords regardless of method to be helpful
     if (result && result.redFlags && result.redFlags.length > 0) {
       highlightKeywords();
     }
 
-    return { success: true, data: result, usedAI: aiUsed };
+    return { success: true, data: result, usedAI: false };
   }
 
   async function runKeywordScan(text) {
@@ -268,38 +256,6 @@
       redFlags: redFlags,
       greenFlags: riskScore < 30 ? ["Looks relatively safe", "Standard terms"] : []
     };
-  }
-
-  async function runAIScan(text) {
-    // Basic chunking to avoid context limits. We take the first 8000 chars.
-    const textToScan = text.substring(0, 8000);
-    const systemPrompt = `You are a helpful Gen-Z assistant that analyzes Terms of Service and Privacy Policies. 
-Your tone is Gen-Z, plain English, and scrapbook aesthetic. 
-Analyze the provided text and output strictly valid JSON matching this structure:
-{
-  "tldr": ["bullet 1"],
-  "riskScore": 50,
-  "redFlags": [
-    {
-      "title": "short title",
-      "detail": "plain English, Gen-Z tone, 1-2 sentences",
-      "severity": "high",
-      "category": "data_selling"
-    }
-  ],
-  "greenFlags": ["user-friendly term"]
-}
-Keep it concise. Do not include markdown code blocks, just the raw JSON.`;
-
-    const session = await window.ai.languageModel.create({ systemPrompt: systemPrompt });
-    const resultStr = await session.prompt("TEXT TO ANALYZE:\n" + textToScan);
-    
-    // Clean up output just in case the model returns markdown code blocks
-    let cleanStr = resultStr.replace(/```json/g, "").replace(/```/g, "").trim();
-    if (cleanStr.startsWith("return") || cleanStr.startsWith("```")) {
-       cleanStr = resultStr.match(/\{[\s\S]*\}/)[0] || cleanStr;
-    }
-    return JSON.parse(cleanStr);
   }
 
   function injectBanner(scanResult) {

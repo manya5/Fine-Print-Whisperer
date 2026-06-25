@@ -10,3 +10,7 @@ desktop.ini
 # Misc
 *.log
 node_modules/
+
+# Cloudflare Worker local secrets & state (backend/)
+.dev.vars
+.wrangler/

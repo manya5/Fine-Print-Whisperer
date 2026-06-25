@@ -1,12 +1,38 @@
 // ─── Popup Interactions ───
 
+// Managed AI backend (deployed Cloudflare Worker). Must match a host in
+// manifest.json "host_permissions". For local testing point this at the URL
+// printed by `wrangler dev` and add that host to the manifest temporarily.
+const FPW_BACKEND = "https://fine-print-whisperer.fine-print-whisperer.workers.dev";
+
+// Stable anonymous id so the backend can rate-limit per install without accounts.
+async function getInstallId() {
+  const { fpwInstallId } = await chrome.storage.local.get("fpwInstallId");
+  if (fpwInstallId) return fpwInstallId;
+  const id = crypto.randomUUID();
+  await chrome.storage.local.set({ fpwInstallId: id });
+  return id;
+}
+
+// Pull the visible ToS text from the page, injecting the content script if needed.
+async function getToSText(tabId) {
+  try {
+    const res = await chrome.tabs.sendMessage(tabId, { action: "get_tos_text" });
+    return res?.text || "";
+  } catch {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    await new Promise((r) => setTimeout(r, 200));
+    const res = await chrome.tabs.sendMessage(tabId, { action: "get_tos_text" });
+    return res?.text || "";
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const settingsBtn = document.getElementById("settings-btn");
   const closeSettingsBtn = document.getElementById("close-settings");
   const settingsPanel = document.getElementById("settings-panel");
   const scanBtn = document.getElementById("scan-btn");
   const autoDetectToggle = document.getElementById("auto-detect-toggle");
-  const aiToggle = document.getElementById("ai-toggle");
   const themeToggleBtn = document.getElementById("theme-toggle");
 
   const resultsContainer = document.getElementById("results-container");
@@ -31,16 +57,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Load Settings
-  const settings = await chrome.storage.local.get(["autoDetect", "useAI"]);
+  const settings = await chrome.storage.local.get(["autoDetect"]);
   autoDetectToggle.checked = settings.autoDetect !== false;
-  aiToggle.checked = settings.useAI !== false;
 
   // Save Settings
   autoDetectToggle.addEventListener("change", (e) => {
     chrome.storage.local.set({ autoDetect: e.target.checked });
-  });
-  aiToggle.addEventListener("change", (e) => {
-    chrome.storage.local.set({ useAI: e.target.checked });
   });
 
   // Settings Panel Toggle
@@ -51,43 +73,48 @@ document.addEventListener("DOMContentLoaded", async () => {
     settingsPanel.classList.remove("open");
   });
 
-  // Scan Button
+  // Scan Button — AI-quality scan via the managed backend, with a local
+  // regex fallback when the backend is unreachable or over quota.
   scanBtn.addEventListener("click", async () => {
     resultsContainer.classList.add("hide");
     messageContainer.classList.add("hide");
     loadingState.classList.remove("hide");
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
+
     if (!tab || !tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("edge://")) {
       showError("doesn't look like fine print to us 🤷");
       return;
     }
 
     try {
-      // First, try to send message (in case content script is already injected)
-      chrome.tabs.sendMessage(tab.id, { 
-        action: "force_scan",
-        useAI: aiToggle.checked 
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          // Content script not injected, let's inject it first
-          chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ["content.js"]
-          }, () => {
-            // Wait a moment for script to initialize
-            setTimeout(() => {
-              chrome.tabs.sendMessage(tab.id, { 
-                action: "force_scan", 
-                useAI: aiToggle.checked 
-              }, handleScanResponse);
-            }, 100);
-          });
-        } else {
-          handleScanResponse(response);
+      const tosText = await getToSText(tab.id);
+      if (!tosText || tosText.trim().length < 50) {
+        showError("this page is giving us nothing 👀");
+        return;
+      }
+
+      // Try the managed AI backend first.
+      try {
+        const installId = await getInstallId();
+        const res = await fetch(`${FPW_BACKEND}/api/scan`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-fpw-install-id": installId },
+          body: JSON.stringify({ text: tosText }),
+        });
+        if (res.ok) {
+          const { data } = await res.json();
+          loadingState.classList.add("hide");
+          renderResults(data, true);
+          return;
         }
-      });
+        console.warn("FPW: backend scan returned", res.status);
+      } catch (err) {
+        console.warn("FPW: backend scan failed, using local fallback.", err);
+      }
+
+      // Fallback: local regex scan from the content script.
+      chrome.tabs.sendMessage(tab.id, { action: "force_scan" }, handleScanResponse);
     } catch (err) {
       showError("this page is giving us nothing 👀");
     }
@@ -95,7 +122,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function handleScanResponse(response) {
     loadingState.classList.add("hide");
-    if (!response || !response.success) {
+    if (chrome.runtime.lastError || !response || !response.success) {
       if (response && response.error === "no_text") {
         showError("this page is giving us nothing 👀");
       } else {
@@ -142,32 +169,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     const flagsContainer = document.getElementById("flags-container");
     flagsContainer.innerHTML = "";
     if (data.redFlags && data.redFlags.length > 0) {
+      const EMOJI = {
+        data_selling: "💸",
+        auto_renewal: "💳",
+        arbitration: "⚖️",
+        cancellation: "🔒",
+        data_collection: "🔍",
+        content_rights: "📝",
+        liability_limitation: "🛡️",
+        terms_changes: "🔄",
+      };
       data.redFlags.forEach((flag, index) => {
         const div = document.createElement("div");
         div.className = `alert-card severity-${flag.severity || 'low'}`;
         div.style.animationDelay = `${index * 0.1}s`;
 
-        let emoji = "⚠️";
-        let showIcon = true;
-        if (flag.category === "data_selling") emoji = "💸";
-        else if (flag.category === "auto_renewal") emoji = "💳";
-        else if (flag.category === "arbitration") emoji = "⚖️";
-        else if (flag.category === "cancellation") emoji = "🔒";
-        else if (flag.category === "data_collection") emoji = "🔍";
-        else if (flag.category === "content_rights") emoji = "📝";
-        else if (flag.category === "liability_limitation") emoji = "🛡️";
-        else if (flag.category === "terms_changes") emoji = "🔄";
+        // Build with textContent — flag.title/detail come from the AI, so never
+        // inject them as HTML.
+        const iconContainer = document.createElement("div");
+        iconContainer.className = "alert-icon-container";
+        const iconPulse = document.createElement("div");
+        iconPulse.className = "alert-icon-pulse";
+        iconPulse.textContent = EMOJI[flag.category] || "⚠️";
+        iconContainer.appendChild(iconPulse);
 
-        const iconHTML = showIcon ? `
-          <div class="alert-icon-container">
-            <div class="alert-icon-pulse">${emoji}</div>
-          </div>` : "";
+        const title = document.createElement("h3");
+        title.className = "alert-title";
+        title.textContent = flag.title || "";
 
-        div.innerHTML = `
-          ${iconHTML}
-          <h3 class="alert-title">${flag.title}</h3>
-          <p class="alert-desc">${flag.detail}</p>
-        `;
+        const desc = document.createElement("p");
+        desc.className = "alert-desc";
+        desc.textContent = flag.detail || "";
+
+        div.append(iconContainer, title, desc);
         flagsContainer.appendChild(div);
       });
     } else {
@@ -207,23 +241,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const chatMessages = document.getElementById("chat-messages");
   const chatChipsContainer = document.getElementById("chat-chips-container");
   const chatChips = document.querySelectorAll(".chat-chip");
-  const geminiKeyInput = document.getElementById("gemini-key-input");
-  const getApiKeyLink = document.getElementById("get-api-key-link");
-
-  // ─── API Key Management ───
-  const geminiSettings = await chrome.storage.local.get("geminiApiKey");
-  if (geminiSettings.geminiApiKey) {
-    geminiKeyInput.value = geminiSettings.geminiApiKey;
-  }
-
-  geminiKeyInput.addEventListener("change", (e) => {
-    chrome.storage.local.set({ geminiApiKey: e.target.value.trim() });
-  });
-
-  getApiKeyLink.addEventListener("click", (e) => {
-    e.preventDefault();
-    chrome.tabs.create({ url: "https://aistudio.google.com/apikey" });
-  });
 
   // ─── Chat Panel Toggle ───
   chatFab.addEventListener("click", () => {
@@ -285,24 +302,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       // 2. Get ToS text from content script
-      let tosText = "";
-      try {
-        const response = await chrome.tabs.sendMessage(tab.id, { action: "get_tos_text" });
-        tosText = response?.text || "";
-      } catch {
-        // Content script not injected — inject it
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ["content.js"]
-          });
-          await new Promise(r => setTimeout(r, 200));
-          const response = await chrome.tabs.sendMessage(tab.id, { action: "get_tos_text" });
-          tosText = response?.text || "";
-        } catch {
-          tosText = "";
-        }
-      }
+      const tosText = await getToSText(tab.id);
 
       if (!tosText || tosText.trim().length < 50) {
         removeTyping(typingId);
@@ -310,20 +310,26 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // 3. Try Gemini API
-      const keySettings = await chrome.storage.local.get("geminiApiKey");
-      if (keySettings.geminiApiKey) {
-        try {
-          const answer = await callGeminiAPI(keySettings.geminiApiKey, tosText, question);
+      // 3. Ask the managed AI backend.
+      try {
+        const installId = await getInstallId();
+        const res = await fetch(`${FPW_BACKEND}/api/chat`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-fpw-install-id": installId },
+          body: JSON.stringify({ tosText, question }),
+        });
+        if (res.ok) {
+          const { answer } = await res.json();
           removeTyping(typingId);
           appendMessage("ai", answer);
           return;
-        } catch (err) {
-          console.warn("FPW Chat: Gemini API failed, falling back to keywords.", err);
         }
+        console.warn("FPW Chat: backend returned", res.status);
+      } catch (err) {
+        console.warn("FPW Chat: backend failed, falling back to keywords.", err);
       }
 
-      // 4. Fallback: keyword matching
+      // 4. Fallback: local keyword matching
       removeTyping(typingId);
       const fallbackAnswer = keywordFallback(question, tosText);
       appendMessage("ai", fallbackAnswer);
@@ -376,57 +382,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   function removeTyping(id) {
     const el = document.getElementById(`typing-${id}`);
     if (el) el.remove();
-  }
-
-  // ─── Gemini API ───
-  async function callGeminiAPI(apiKey, tosText, question) {
-    const trimmedTos = tosText.substring(0, 6000);
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{
-              text: `You are "Fine Print Whisperer" — a Gen-Z, friendly AI that answers questions about Terms of Service and Privacy Policy documents.
-
-Rules:
-- ONLY answer based on the provided document text
-- If the answer is NOT clearly in the document, honestly say "I couldn't find that in this document 🤷"
-- Keep answers concise — 2-3 sentences MAX
-- Use a casual, friendly Gen-Z tone with occasional emoji
-- If you spot concerning clauses, flag them with ⚠️
-- Never make up information that isn't in the document`
-            }]
-          },
-          contents: [{
-            parts: [{
-              text: `Here is the Terms of Service / Privacy Policy text:\n\n---\n${trimmedTos}\n---\n\nQuestion: ${question}`
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 300
-          }
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      const errMsg = errData.error?.message || `HTTP ${response.status}`;
-      throw new Error(errMsg);
-    }
-
-    const data = await response.json();
-
-    if (!data.candidates || !data.candidates[0]?.content?.parts?.[0]?.text) {
-      throw new Error("Empty response from API");
-    }
-
-    return data.candidates[0].content.parts[0].text;
   }
 
   // ─── Keyword Fallback (no AI needed) ───
@@ -484,7 +439,7 @@ Rules:
     }
 
     if (!matchedTopic) {
-      return "I'm not sure about that one without AI 🤔\n\nAdd your free Gemini API key in ⚙️ Settings for smarter answers!\n\nOr try asking about: refunds, data sharing, cancellation, location tracking, or arbitration 💡";
+      return "I couldn't reach the AI just now 🤔 Try again in a sec!\n\nOr ask about: refunds, data sharing, cancellation, location tracking, or arbitration 💡";
     }
 
     // Find relevant sentences
